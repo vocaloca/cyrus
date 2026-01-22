@@ -129,6 +129,11 @@ export class EdgeWorker extends EventEmitter {
 	private askUserQuestionHandler: AskUserQuestionHandler;
 	/** User access control for whitelisting/blacklisting Linear users */
 	private userAccessControl: UserAccessControl;
+	/** Cache for issue details to reduce Linear API calls. Key: issueId, Value: { issue, timestamp } */
+	private issueCache: Map<string, { issue: Issue; timestamp: number }> =
+		new Map();
+	/** TTL for issue cache in milliseconds (5 minutes) */
+	private readonly issueCacheTTL = 5 * 60 * 1000;
 
 	constructor(config: EdgeWorkerConfig) {
 		super();
@@ -6311,12 +6316,22 @@ ${input.userComment}
 	}
 
 	/**
-	 * Fetch complete issue details from Linear API
+	 * Fetch complete issue details from Linear API (with caching)
 	 */
 	public async fetchFullIssueDetails(
 		issueId: string,
 		repositoryId: string,
 	): Promise<Issue | null> {
+		// Check cache first
+		const cached = this.issueCache.get(issueId);
+		const now = Date.now();
+		if (cached && now - cached.timestamp < this.issueCacheTTL) {
+			console.log(
+				`[EdgeWorker] Using cached issue details for ${issueId} (age: ${Math.round((now - cached.timestamp) / 1000)}s)`,
+			);
+			return cached.issue;
+		}
+
 		const issueTracker = this.issueTrackers.get(repositoryId);
 		if (!issueTracker) {
 			console.warn(
@@ -6331,6 +6346,9 @@ ${input.userComment}
 			console.log(
 				`[EdgeWorker] Successfully fetched issue details for ${issueId}`,
 			);
+
+			// Cache the issue
+			this.issueCache.set(issueId, { issue: fullIssue, timestamp: now });
 
 			// Check if issue has a parent
 			try {
@@ -6352,6 +6370,24 @@ ${input.userComment}
 			);
 			return null;
 		}
+	}
+
+	/**
+	 * Invalidate cached issue details (call when issue is modified)
+	 */
+	public invalidateIssueCache(issueId: string): void {
+		if (this.issueCache.delete(issueId)) {
+			console.log(`[EdgeWorker] Invalidated cache for issue ${issueId}`);
+		}
+	}
+
+	/**
+	 * Clear all cached issue details
+	 */
+	public clearIssueCache(): void {
+		const size = this.issueCache.size;
+		this.issueCache.clear();
+		console.log(`[EdgeWorker] Cleared issue cache (${size} entries)`);
 	}
 
 	// ========================================================================
