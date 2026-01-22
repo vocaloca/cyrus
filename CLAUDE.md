@@ -14,6 +14,9 @@ Cyrus (Linear Claude Agent) is a monorepo JavaScript/TypeScript application that
 - Maintains conversation continuity using the `--continue` flag
 - Supports edge worker mode for distributed processing
 
+## Development Guidelines
+
+- **Exception Handling**: When encountering an exception, do not try to ignore it or work around it. Investigate the root cause and handle it properly. Understand why the exception occurred before implementing a fix.
 
 ## How Cyrus Works
 
