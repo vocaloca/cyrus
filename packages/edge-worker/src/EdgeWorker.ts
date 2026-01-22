@@ -520,7 +520,10 @@ export class EdgeWorker extends EventEmitter {
 		// 3. Register /status endpoint for process activity monitoring
 		this.registerStatusEndpoint();
 
-		// 4. Register /version endpoint for CLI version info
+		// 4. Register /status/detailed endpoint for graceful shutdown visibility
+		this.registerDetailedStatusEndpoint();
+
+		// 5. Register /version endpoint for CLI version info
 		this.registerVersionEndpoint();
 	}
 
@@ -538,6 +541,58 @@ export class EdgeWorker extends EventEmitter {
 
 		console.log("✅ Status endpoint registered");
 		console.log("   Route: GET /status");
+	}
+
+	/**
+	 * Register the /status/detailed endpoint for graceful shutdown visibility
+	 * Returns active sessions with Linear issue information
+	 */
+	private registerDetailedStatusEndpoint(): void {
+		const fastify = this.sharedApplicationServer.getFastifyInstance();
+
+		fastify.get("/status/detailed", async (_request, reply) => {
+			const status = this.computeStatus();
+			const activeSessions: Array<{
+				issueId: string;
+				issueIdentifier: string;
+				issueTitle: string;
+				sessionId: string;
+				repositoryId: string;
+				startedAt: number;
+				runningDurationMs: number;
+			}> = [];
+
+			// Collect active sessions from all repositories
+			for (const [repoId, manager] of this.agentSessionManagers.entries()) {
+				const sessions = manager.getActiveSessions();
+				for (const session of sessions) {
+					const runner = manager.getAgentRunner(
+						session.linearAgentActivitySessionId,
+					);
+					if (runner?.isRunning()) {
+						activeSessions.push({
+							issueId: session.issueId,
+							issueIdentifier: session.issue?.identifier ?? "unknown",
+							issueTitle: session.issue?.title ?? "unknown",
+							sessionId: session.linearAgentActivitySessionId,
+							repositoryId: repoId,
+							startedAt: session.createdAt,
+							runningDurationMs: Date.now() - session.createdAt,
+						});
+					}
+				}
+			}
+
+			return reply.status(200).send({
+				status,
+				activeWebhookCount: this.activeWebhookCount,
+				activeSessions,
+				timestamp: new Date().toISOString(),
+			});
+		});
+
+		console.log("✅ Detailed status endpoint registered");
+		console.log("   Route: GET /status/detailed");
 	}
 
 	/**
